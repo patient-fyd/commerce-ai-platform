@@ -2,9 +2,9 @@
 
 CommerceAI Platform 是一个长期学习与实践项目，目标是从商业事件数据出发，逐步搭建一条覆盖数据采集、实时计算、分析建模、语义治理与智能应用的现代数据平台链路。
 
-当前状态：**Phase 0 - Project Bootstrap**
+当前状态：**Phase 0 - Local Data Foundation**
 
-本仓库目前仅完成项目目录、基础文档和开发约定的初始化。除项目骨架外，数据服务、处理任务、分析模型以及 AI 能力均尚未实现。
+本仓库已实现第一版 MySQL Source Model，用于模拟用户、商品、订单、支付和退款的 OLTP 业务数据。数据采集、流处理、分析数仓以及 AI 能力均尚未实现。
 
 ## 项目目标
 
@@ -66,8 +66,8 @@ Evaluation / Governance
 
 | 阶段 | 主题 | 状态 |
 | --- | --- | --- |
-| Phase 0 | Project Bootstrap：仓库骨架、基础文档与开发约定 | **当前阶段** |
-| Phase 1 | Source & Ingestion：MySQL、事件生成与 NiFi 采集 | 未开始 |
+| Phase 0 | Local Data Foundation：项目骨架与 MySQL OLTP 数据源 | **当前阶段（MySQL Source Model 已实现）** |
+| Phase 1 | Source & Ingestion：事件生成与 NiFi 采集 | 未开始 |
 | Phase 2 | Event Streaming：Kafka 事件管道 | 未开始 |
 | Phase 3 | Stream Processing：Flink CDC 与流处理 | 未开始 |
 | Phase 4 | Real-time Warehouse：Apache Doris 与分层数据模型 | 未开始 |
@@ -90,12 +90,98 @@ Evaluation / Governance
 
 ## 当前进度
 
-Phase 0 已建立预期的目录结构，并提供 `.gitignore`、`Makefile`、架构概览与 ADR 模板。当前没有可运行的数据服务，也没有实现 Phase 1-9 的功能。
+Phase 0 已建立项目骨架，并实现可独立运行的本地 MySQL 8.4 数据源：
 
-可用命令：
+- 规范化 OLTP 模型：用户、分类、SPU、SKU、订单、订单明细、支付和退款。
+- 少量人工可读的关系验证数据。
+- Apple Silicon 可用的单节点 MySQL Compose，包含健康检查和持久化卷。
+- 启停、状态、日志和数据库终端命令。
+
+源模型设计见 [`docs/data-model/source-model.md`](docs/data-model/source-model.md)。Phase 1-9 的数据采集、消息、计算、数仓、语义层和 AI 能力仍未实现。
+
+## Local MySQL Development
+
+### 准备配置
+
+仓库只提交示例配置。先创建被 Git 忽略的本地 `.env`，并替换其中的示例密码：
 
 ```bash
-make help
+cp .env.example .env
+```
+
+### 启动与停止
+
+```bash
+make mysql-up
+make mysql-status
+make mysql-logs
+make mysql-restart
+make mysql-down
+```
+
+`mysql-down` 会停止并移除容器和 Compose 网络，但保留 MySQL 命名卷，后续启动会继续使用已有数据。
+
+### 连接
+
+使用容器内置客户端和 `.env` 中的应用账号连接：
+
+```bash
+make mysql-cli
+```
+
+也可以从宿主机客户端连接，端口和凭据以本地 `.env` 为准：
+
+```bash
+mysql --host=127.0.0.1 --port=3306 --user=commerce_app --password commerce
+```
+
+### 首次初始化行为
+
+MySQL 官方镜像只会在数据目录为空的**第一次启动**时执行 `/docker-entrypoint-initdb.d/` 中的脚本。本项目按顺序执行：
+
+1. 由 `MYSQL_DATABASE` 创建 `commerce` 数据库（示例配置值）。
+2. 执行 `source/mysql/schema.sql`。
+3. 执行 `source/mysql/seed.sql`。
+
+修改 SQL 文件后，仅执行 `make mysql-restart` 不会重新初始化已有数据库。如需从头验证初始化，可在确认本地数据可丢弃后执行以下命令删除 Compose 数据卷，再重新启动：
+
+```bash
+docker compose --env-file .env -f infra/compose/compose.mysql.yml down -v
+make mysql-up
+```
+
+### 验证
+
+先检查 Compose 最终配置：
+
+```bash
+docker compose --env-file .env -f infra/compose/compose.mysql.yml config
+```
+
+MySQL 健康后进入客户端，可执行以下关系检查：
+
+种子数据的预期数量为 8 个用户、8 个 SKU、12 张订单、16 条订单明细、13 次支付尝试和 5 次退款请求。
+
+```sql
+SELECT COUNT(*) AS user_count FROM user_info;
+SELECT COUNT(*) AS sku_count FROM sku_info;
+SELECT COUNT(*) AS order_count FROM order_info;
+
+SELECT o.order_no, d.sku_name_snapshot, d.quantity, d.line_amount
+FROM order_info AS o
+JOIN order_detail AS d ON d.order_id = o.order_id
+ORDER BY o.order_id, d.order_detail_id;
+
+SELECT o.order_no, p.payment_attempt_no, p.payment_status, p.payment_amount
+FROM order_info AS o
+JOIN payment_info AS p ON p.order_id = o.order_id
+ORDER BY o.order_id, p.payment_attempt_no;
+
+SELECT r.refund_no, o.order_no, d.sku_name_snapshot, r.refund_status, r.refund_amount
+FROM refund_info AS r
+JOIN order_info AS o ON o.order_id = r.order_id
+JOIN order_detail AS d ON d.order_detail_id = r.order_detail_id
+ORDER BY r.refund_id;
 ```
 
 ## 项目目录
@@ -121,5 +207,4 @@ commerce-ai-platform/
 
 ## 安全约定
 
-严禁提交 `.env`、密码、Token、API Key、私钥、凭据文件、数据库真实数据和本地 Docker 运行时数据。需要共享变量名时，应在后续阶段使用不包含真实值的 `.env.example`。
-
+严禁提交 `.env`、密码、Token、API Key、私钥、凭据文件、数据库真实数据和本地 Docker 运行时数据。需要共享变量名时，使用只包含示例值的 `.env.example`。
