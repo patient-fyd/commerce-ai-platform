@@ -4,7 +4,7 @@ CommerceAI Platform 是一个长期学习与实践项目，目标是从商业事
 
 当前状态：**Phase 0 - Local Data Foundation**
 
-本仓库已实现第一版 MySQL Source Model，用于模拟用户、商品、订单、支付和退款的 OLTP 业务数据。数据采集、流处理、分析数仓以及 AI 能力均尚未实现。
+本仓库已实现第一版 MySQL Source Model，以及为该模型生成可重复模拟数据的本地 Python 工具。数据采集、流处理、分析数仓以及 AI 能力均尚未实现。
 
 ## 项目目标
 
@@ -94,10 +94,21 @@ Phase 0 已建立项目骨架，并实现可独立运行的本地 MySQL 8.4 数�
 
 - 规范化 OLTP 模型：用户、分类、SPU、SKU、订单、订单明细、支付和退款。
 - 少量人工可读的关系验证数据。
+- 可配置随机种子和日期范围、带生成前业务校验的 synthetic SQL 数据生成器。
 - Apple Silicon 可用的单节点 MySQL Compose，包含健康检查和持久化卷。
 - 启停、状态、日志和数据库终端命令。
 
 源模型设计见 [`docs/data-model/source-model.md`](docs/data-model/source-model.md)。Phase 1-9 的数据采集、消息、计算、数仓、语义层和 AI 能力仍未实现。
+
+## Synthetic Data Generator
+
+默认生成 `small` 数据集（约 10,000 张订单），输出目录不会被 Git 跟踪：
+
+```bash
+make generate-data
+```
+
+可通过 `SCALE`、`SEED`、`START_DATE`、`END_DATE` 和 `DATA_OUTPUT` 覆盖参数。完整的场景、导入和验证说明见 [`source/data-generator/README.md`](source/data-generator/README.md)。
 
 ## Local MySQL Development
 
