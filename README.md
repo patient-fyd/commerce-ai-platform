@@ -93,7 +93,6 @@ Evaluation / Governance
 Phase 0 已建立项目骨架，并实现可独立运行的本地 MySQL 8.4 数据源：
 
 - 规范化 OLTP 模型：用户、分类、SPU、SKU、订单、订单明细、支付和退款。
-- 少量人工可读的关系验证数据。
 - 可配置随机种子和日期范围、带生成前业务校验的 synthetic SQL 数据生成器。
 - Apple Silicon 可用的单节点 MySQL Compose，包含健康检查和持久化卷。
 - 启停、状态、日志和数据库终端命令。
@@ -106,9 +105,10 @@ Phase 0 已建立项目骨架，并实现可独立运行的本地 MySQL 8.4 数�
 
 ```bash
 make generate-data
+make import-generated-data
 ```
 
-可通过 `SCALE`、`SEED`、`START_DATE`、`END_DATE` 和 `DATA_OUTPUT` 覆盖参数。完整的场景、导入和验证说明见 [`source/data-generator/README.md`](source/data-generator/README.md)。
+MySQL 新数据卷只自动创建表结构，不再自动导入 `source/mysql/seed.sql`。`import-generated-data` 应在空的 `commerce` 数据库中执行；重复导入会因主键和唯一键冲突而失败。可通过 `SCALE`、`SEED`、`START_DATE`、`END_DATE` 和 `DATA_OUTPUT` 覆盖参数。完整的场景、导入和验证说明见 [`source/data-generator/README.md`](source/data-generator/README.md)。
 
 ## Local MySQL Development
 
@@ -148,11 +148,17 @@ mysql --host=127.0.0.1 --port=3306 --user=commerce_app --password commerce
 
 ### 首次初始化行为
 
-MySQL 官方镜像只会在数据目录为空的**第一次启动**时执行 `/docker-entrypoint-initdb.d/` 中的脚本。本项目按顺序执行：
+MySQL 官方镜像只会在数据目录为空的**第一次启动**时执行 `/docker-entrypoint-initdb.d/` 中的脚本。本项目执行：
 
 1. 由 `MYSQL_DATABASE` 创建 `commerce` 数据库（示例配置值）。
 2. 执行 `source/mysql/schema.sql`。
-3. 执行 `source/mysql/seed.sql`。
+
+`source/mysql/seed.sql` 不再自动执行，避免其固定主键与数据生成器冲突。表结构初始化完成后，通过生成器写入业务数据：
+
+```bash
+make generate-data
+make import-generated-data
+```
 
 修改 SQL 文件后，仅执行 `make mysql-restart` 不会重新初始化已有数据库。如需从头验证初始化，可在确认本地数据可丢弃后执行以下命令删除 Compose 数据卷，再重新启动：
 
@@ -169,9 +175,7 @@ make mysql-up
 docker compose --env-file .env -f infra/compose/compose.mysql.yml config
 ```
 
-MySQL 健康后进入客户端，可执行以下关系检查：
-
-种子数据的预期数量为 8 个用户、8 个 SKU、12 张订单、16 条订单明细、13 次支付尝试和 5 次退款请求。
+MySQL 健康且生成数据导入完成后进入客户端，可执行以下数量和关系检查：
 
 ```sql
 SELECT COUNT(*) AS user_count FROM user_info;

@@ -1,4 +1,5 @@
--- Small, deterministic sample data for validating the OLTP relationships.
+-- Optional legacy sample data for manually validating the OLTP relationships.
+-- This file is not loaded by Compose; do not import it before generated data.
 -- All business timestamps are local Asia/Shanghai times.
 
 SET NAMES utf8mb4 COLLATE utf8mb4_0900_ai_ci;

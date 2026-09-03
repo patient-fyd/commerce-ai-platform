@@ -50,20 +50,15 @@ python3 source/data-generator/generate.py --help
 
 ## 导入 MySQL
 
-SQL 使用显式主键以保证结果可重复，因此必须导入已经执行 `source/mysql/schema.sql` 且没有现有业务数据的数据库。不要直接导入已有 `source/mysql/seed.sql` 数据的 `commerce` 数据库，否则唯一键会冲突。
-
-下面示例使用宿主机 MySQL 客户端和一个单独的空开发数据库：
+SQL 使用显式主键以保证结果可重复，因此必须导入已经执行 `source/mysql/schema.sql` 且没有现有业务数据的 `commerce` 数据库。MySQL Compose 在新数据卷第一次启动时只初始化 schema，不自动执行 `source/mysql/seed.sql`。
 
 ```bash
-mysql --host=127.0.0.1 --port=3306 --user=root --password \
-  -e 'CREATE DATABASE commerce_generated CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci'
-mysql --host=127.0.0.1 --port=3306 --user=root --password commerce_generated \
-  < source/mysql/schema.sql
-mysql --host=127.0.0.1 --port=3306 --user=root --password commerce_generated \
-  < source/data-generator/output/generated-data.sql
+make mysql-up
+make generate-data
+make import-generated-data
 ```
 
-数据库名和账号权限以本地 `.env` 为准。若数据库已经存在，请另选空数据库；生成器不会清空任何现有数据。
+`import-generated-data` 使用 `.env` 中的数据库名和应用账号，将 `DATA_OUTPUT` 导入当前数据库。它不会自动清表；重复导入会因主键和唯一键冲突而失败。如果数据库已有数据，需要明确确认数据可以丢弃后删除 Compose 数据卷并重新初始化。
 
 ## 校验
 

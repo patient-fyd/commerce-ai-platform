@@ -1,4 +1,4 @@
-.PHONY: help mysql-up mysql-down mysql-restart mysql-logs mysql-status mysql-cli generate-data
+.PHONY: help mysql-up mysql-down mysql-restart mysql-logs mysql-status mysql-cli generate-data import-generated-data
 
 MYSQL_COMPOSE_FILE ?= infra/compose/compose.mysql.yml
 MYSQL_ENV_FILE ?= .env
@@ -21,9 +21,15 @@ help: ## 显示当前可用命令
 	@echo "  make mysql-status   查看 MySQL 容器状态"
 	@echo "  make mysql-cli      使用应用账号进入 commerce 数据库"
 	@echo "  make generate-data  生成可重复的模拟电商 SQL 数据"
+	@echo "  make import-generated-data  将生成的 SQL 导入空的 commerce 数据库"
 
 generate-data: ## 生成模拟电商 SQL 数据；可覆盖 SCALE、SEED、START_DATE、END_DATE、DATA_OUTPUT
 	@python3 source/data-generator/generate.py --scale "$(SCALE)" --seed "$(SEED)" --start-date "$(START_DATE)" --end-date "$(END_DATE)" --output "$(DATA_OUTPUT)"
+
+import-generated-data: ## 将 DATA_OUTPUT 导入当前空的 commerce 数据库
+	@test -f "$(DATA_OUTPUT)" || { echo "未找到生成文件：$(DATA_OUTPUT)，请先执行 make generate-data"; exit 1; }
+	@$(MYSQL_COMPOSE) exec -T mysql sh -c 'MYSQL_PWD="$${MYSQL_PASSWORD}" exec mysql --default-character-set=utf8mb4 --user="$${MYSQL_USER}" "$${MYSQL_DATABASE}"' < "$(DATA_OUTPUT)"
+	@echo "已将 $(DATA_OUTPUT) 导入 MySQL。"
 
 mysql-up: ## 启动本地 MySQL
 	@$(MYSQL_COMPOSE) up -d
