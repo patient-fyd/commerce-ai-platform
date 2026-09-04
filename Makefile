@@ -1,8 +1,11 @@
-.PHONY: help mysql-up mysql-down mysql-restart mysql-logs mysql-status mysql-cli generate-data import-generated-data
+.PHONY: help mysql-up mysql-down mysql-restart mysql-logs mysql-status mysql-cli doris-up doris-down doris-restart doris-logs doris-status doris-check doris-cli generate-data import-generated-data
 
 MYSQL_COMPOSE_FILE ?= infra/compose/compose.mysql.yml
 MYSQL_ENV_FILE ?= .env
 MYSQL_COMPOSE = docker compose --env-file $(MYSQL_ENV_FILE) -f $(MYSQL_COMPOSE_FILE)
+DORIS_COMPOSE_FILE ?= infra/compose/compose.doris.yml
+DORIS_ENV_FILE ?= .env
+DORIS_COMPOSE = docker compose --env-file $(DORIS_ENV_FILE) -f $(DORIS_COMPOSE_FILE)
 SCALE ?= small
 SEED ?= 42
 START_DATE ?= 2026-01-01
@@ -20,6 +23,13 @@ help: ## 显示当前可用命令
 	@echo "  make mysql-logs     持续查看 MySQL 日志"
 	@echo "  make mysql-status   查看 MySQL 容器状态"
 	@echo "  make mysql-cli      使用应用账号进入 commerce 数据库"
+	@echo "  make doris-up       启动本地 Doris 并初始化 commerce_ai"
+	@echo "  make doris-down     停止本地 Doris（保留数据卷）"
+	@echo "  make doris-restart  重启本地 Doris 并确认初始化"
+	@echo "  make doris-logs     持续查看 Doris 日志"
+	@echo "  make doris-status   查看 Doris 容器状态"
+	@echo "  make doris-check    检查 FE、BE、数据库与 SQL"
+	@echo "  make doris-cli      进入 Doris SQL 终端"
 	@echo "  make generate-data  生成可重复的模拟电商 SQL 数据"
 	@echo "  make import-generated-data  将生成的 SQL 导入空的 commerce 数据库"
 
@@ -48,3 +58,26 @@ mysql-status: ## 查看 MySQL 容器状态
 
 mysql-cli: ## 使用应用账号进入 commerce 数据库
 	@$(MYSQL_COMPOSE) exec mysql sh -c 'MYSQL_PWD="$${MYSQL_PASSWORD}" exec mysql --default-character-set=utf8mb4 --user="$${MYSQL_USER}" "$${MYSQL_DATABASE}"'
+
+doris-up: ## 启动本地 Doris 并幂等初始化 commerce_ai 数据库
+	@$(DORIS_COMPOSE) up -d
+	@DORIS_COMPOSE_FILE="$(abspath $(DORIS_COMPOSE_FILE))" DORIS_ENV_FILE="$(abspath $(DORIS_ENV_FILE))" infra/scripts/init-doris.sh
+
+doris-down: ## 停止本地 Doris，但保留 FE metadata 与 BE storage 数据卷
+	@$(DORIS_COMPOSE) down
+
+doris-restart: ## 重启本地 Doris 并确认 commerce_ai 数据库存在
+	@$(DORIS_COMPOSE) up -d --force-recreate doris
+	@DORIS_COMPOSE_FILE="$(abspath $(DORIS_COMPOSE_FILE))" DORIS_ENV_FILE="$(abspath $(DORIS_ENV_FILE))" infra/scripts/init-doris.sh
+
+doris-logs: ## 持续查看 Doris 日志
+	@$(DORIS_COMPOSE) logs -f doris
+
+doris-status: ## 查看 Doris 容器状态
+	@$(DORIS_COMPOSE) ps doris
+
+doris-check: ## 检查 Doris 容器、FE、BE、数据库与基本查询
+	@DORIS_COMPOSE_FILE="$(abspath $(DORIS_COMPOSE_FILE))" DORIS_ENV_FILE="$(abspath $(DORIS_ENV_FILE))" infra/scripts/check-doris.sh
+
+doris-cli: ## 使用容器内置 MySQL 客户端进入 commerce_ai 数据库
+	@$(DORIS_COMPOSE) exec doris bash -c 'MYSQL_PWD="$${DORIS_ROOT_PASSWORD}" exec mysql --host=127.0.0.1 --port=9030 --user=root commerce_ai'

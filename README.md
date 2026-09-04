@@ -4,7 +4,7 @@ CommerceAI Platform 是一个长期学习与实践项目，目标是从商业事
 
 当前状态：**Phase 0 - Local Data Foundation**
 
-本仓库已实现第一版 MySQL Source Model，以及为该模型生成可重复模拟数据的本地 Python 工具。数据采集、流处理、分析数仓以及 AI 能力均尚未实现。
+本仓库已实现第一版 MySQL Source Model、为该模型生成可重复模拟数据的本地 Python 工具，以及可独立运行的单节点 Apache Doris 本地开发环境。数据采集、流处理、Doris 数仓分层模型以及 AI 能力均尚未实现。
 
 ## 项目目标
 
@@ -66,7 +66,7 @@ Evaluation / Governance
 
 | 阶段 | 主题 | 状态 |
 | --- | --- | --- |
-| Phase 0 | Local Data Foundation：项目骨架与 MySQL OLTP 数据源 | **当前阶段（MySQL Source Model 已实现）** |
+| Phase 0 | Local Data Foundation：项目骨架、MySQL OLTP 数据源与本地 Doris 基础环境 | **当前阶段** |
 | Phase 1 | Source & Ingestion：事件生成与 NiFi 采集 | 未开始 |
 | Phase 2 | Event Streaming：Kafka 事件管道 | 未开始 |
 | Phase 3 | Stream Processing：Flink CDC 与流处理 | 未开始 |
@@ -90,14 +90,15 @@ Evaluation / Governance
 
 ## 当前进度
 
-Phase 0 已建立项目骨架，并实现可独立运行的本地 MySQL 8.4 数据源：
+Phase 0 已建立项目骨架与可独立运行的本地数据基础：
 
 - 规范化 OLTP 模型：用户、分类、SPU、SKU、订单、订单明细、支付和退款。
 - 可配置随机种子和日期范围、带生成前业务校验的 synthetic SQL 数据生成器。
 - Apple Silicon 可用的单节点 MySQL Compose，包含健康检查和持久化卷。
-- 启停、状态、日志和数据库终端命令。
+- Apple Silicon 原生单节点 Doris All-In-One Compose，包含健康检查、幂等数据库初始化和持久化卷。
+- MySQL 与 Doris 各自独立的启停、状态、日志和数据库终端命令。
 
-源模型设计见 [`docs/data-model/source-model.md`](docs/data-model/source-model.md)。Phase 1-9 的数据采集、消息、计算、数仓、语义层和 AI 能力仍未实现。
+源模型设计见 [`docs/data-model/source-model.md`](docs/data-model/source-model.md)。Doris 当前只提供本地运行基础设施和空的 `commerce_ai` 数据库；ODS、DIM、DWD、DWS、ADS 等数仓模型均未创建。Phase 1-9 的数据采集、消息、计算、数仓建模、语义层和 AI 能力仍未实现。
 
 ## Synthetic Data Generator
 
@@ -199,6 +200,82 @@ JOIN order_detail AS d ON d.order_detail_id = r.order_detail_id
 ORDER BY r.refund_id;
 ```
 
+## Local Doris Development
+
+### 镜像与适用范围
+
+本项目使用 `apache/doris:all-in-one-4.1.3`。这是 Apache Doris 官方提供的 All-In-One 基础镜像，在一个容器内运行单 FE、单 BE 和单副本，适合本地开发与集成测试，不用于生产。选择 4.1.3 是因为它是当前官方 Latest 版本，并且同一 tag 的 OCI image index 同时提供 `linux/arm64` 和 `linux/amd64`；Compose 明确选择 `linux/arm64`，不会在 Apple Silicon 上运行 amd64 模拟镜像。基础 tag 已满足内部表开发需要，因此不使用包含额外 Hudi、Trino 和 MaxCompute 组件的 `-full` tag。详见 [Apache Doris All-In-One 官方说明](https://doris.apache.org/community/developer-guide/all-in-one-image/) 和 [官方版本页](https://doris.apache.org/download/)。
+
+All-In-One 镜像已内置适合 CI / 本地测试的资源参数：FE heap 为 `-Xmx2048m`，BE JNI heap 为 `-Xmx1024m`，BE `mem_limit = 40%`。本项目不通过 `FE_CONFIG_EXTRA` 或 `BE_CONFIG_EXTRA` 重复覆盖这些值，避免容器上限与进程内限制互相冲突。
+
+### 资源建议
+
+在 24GB RAM 的 Mac 上，建议将 Docker Desktop 总内存设为 **10GB**，为 macOS、浏览器、IDE、ChatGPT / Codex 和按需运行的 MySQL 留出空间。Doris 容器默认限制为 **4 CPU / 6GB RAM**；这是容器级硬上限，不改变镜像内部的 FE / BE 内存参数。空闲开发环境无需为了生产建议值提高资源。
+
+如确有需要，可在本地 `.env` 中覆盖 `DORIS_MEMORY_LIMIT` 和 `DORIS_CPUS`，但降低内存时要注意 FE 固定的 2GB heap 及 BE 的额外开销。
+
+### 本地账号
+
+Doris 使用 `root` 用户，并从被 Git 忽略的本地 `.env` 读取 `DORIS_ROOT_PASSWORD`。示例配置让它复用 `MYSQL_ROOT_PASSWORD`，因此只需维护一个本地 root 密码：
+
+```dotenv
+DORIS_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+```
+
+首次启动和后续启动都会确保 Doris 密码与该值一致。官方 All-In-One entrypoint 必须从容器内部 `127.0.0.1` 使用 root 完成 BE 注册，因此 Compose 仅为容器内 localhost 启用 `skip_localhost_auth_check`；通过宿主机映射端口连接仍需密码。
+
+### 启动、停止与状态
+
+```bash
+make doris-up
+make doris-status
+make doris-logs
+make doris-restart
+make doris-down
+```
+
+`doris-up` 只启动 Doris，等待内置健康检查确认 FE 和 BE 均已就绪，然后调用 `infra/scripts/init-doris.sh` 幂等执行：
+
+```sql
+CREATE DATABASE IF NOT EXISTS commerce_ai;
+```
+
+All-In-One 镜像不使用 MySQL 的 `docker-entrypoint-initdb.d` 初始化约定，因此项目使用显式脚本，不模拟不属于该镜像的 entrypoint 行为。`doris-down` 停止并移除容器与 Compose 网络，但保留数据卷。
+
+### 连接与检查
+
+使用容器内置的 MySQL 协议客户端进入 `commerce_ai`：
+
+```bash
+make doris-cli
+```
+
+也可以从宿主机客户端连接。密码输入本地 `.env` 中的 `DORIS_ROOT_PASSWORD`；本项目将端口仅绑定到 `127.0.0.1`：
+
+```bash
+mysql --host=127.0.0.1 --port=9030 --user=root --password commerce_ai
+```
+
+FE Web / HTTP 端口为 `8030`，BE HTTP / Stream Load 端口为 `8040`，MySQL 协议查询端口为 `9030`。运行完整检查：
+
+```bash
+docker compose --env-file .env -f infra/compose/compose.doris.yml config --quiet
+make doris-check
+```
+
+该命令检查容器、FE HTTP 接口、BE 注册与 Alive 状态、`commerce_ai` 数据库以及 `SELECT 1`，任一失败都会返回非零退出码。
+
+### 数据持久化与彻底重置
+
+FE metadata 和 BE storage 分别保存在命名卷 `commerce_ai_doris_fe_meta` 与 `commerce_ai_doris_be_storage`。普通停止和重启不会删除这些卷。
+
+> **Warning：以下命令会永久删除本地 Doris metadata 和全部 Doris 数据，无法通过项目恢复。请先确认其中没有需要保留的数据。** Makefile 不提供默认 reset 命令；只有需要从空环境重新验证时，才手工执行：
+
+```bash
+docker compose --env-file .env -f infra/compose/compose.doris.yml down -v
+make doris-up
+```
+
 ## 项目目录
 
 ```text
@@ -207,7 +284,7 @@ commerce-ai-platform/
 ├── source/                # MySQL 数据源与事件生成器
 ├── nifi/                  # NiFi 流程定义
 ├── flink/                 # Flink CDC 与流处理任务
-├── doris/                 # Doris 分层 DDL 与数据加载
+├── doris/                 # 未来 Phase 的 Doris 分层 DDL 与数据加载
 ├── warehouse/dbt/         # dbt 分析工程项目
 ├── semantic/              # 语义层定义
 ├── metadata/              # 元数据采集与血缘

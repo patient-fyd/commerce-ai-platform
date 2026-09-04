@@ -2,7 +2,7 @@
 
 ## 文档范围
 
-本文描述 CommerceAI Platform 计划逐阶段建设的目标架构，用于指导后续设计和学习路径。当前项目处于 **Phase 0 - Project Bootstrap**；本文提及的组件和数据链路尚未因此自动具备或实现。
+本文描述 CommerceAI Platform 计划逐阶段建设的目标架构，用于指导后续设计和学习路径。当前项目处于 **Phase 0 - Local Data Foundation**；目标链路中仅 MySQL 数据源、Synthetic Data Generator 和 Doris 本地基础环境已经实现，组件存在不代表组件间链路已打通。
 
 ## 目标数据链路
 
@@ -54,5 +54,10 @@ Evaluation / Governance
 
 ## 当前实现边界
 
-Phase 0 仅提供目录骨架、基础项目文档和开发约定。目标架构中的运行时服务、数据管道、模型、语义层和 AI 能力均留待各自阶段实现。
+Phase 0 当前已经实现：
 
+- 单节点 MySQL 8.4 本地数据源及其 OLTP schema。
+- 生成可重复小规模电商 SQL 数据的 Synthetic Data Generator。
+- Apple Silicon 原生的 Apache Doris All-In-One 本地环境：单 FE、单 BE、单副本、持久化存储，以及空的 `commerce_ai` 数据库。
+
+MySQL、Generator 和 Doris 目前可以各自独立运行，但尚未形成自动采集或流式数据链路。NiFi、Kafka、Flink、Doris 数仓分层模型、dbt、Semantic Layer、Metadata / Lineage、RAG、Data Agent、Evaluation / Governance 均未实现，留待各自 Phase。
