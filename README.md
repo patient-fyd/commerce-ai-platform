@@ -2,7 +2,7 @@
 
 CommerceAI Platform 是一个长期学习与实践项目，目标是从商业事件数据出发，逐步搭建一条覆盖数据采集、实时计算、分析建模、语义治理与智能应用的现代数据平台链路。
 
-当前状态：**Phase 0 - Local Data Foundation**
+当前状态：**Phase 0 - Local Data Foundation｜Completed**
 
 本仓库已实现第一版 MySQL Source Model、为该模型生成可重复模拟数据的本地 Python 工具，以及可独立运行的单节点 Apache Doris 本地开发环境。数据采集、流处理、Doris 数仓分层模型以及 AI 能力均尚未实现。
 
@@ -66,8 +66,8 @@ Evaluation / Governance
 
 | 阶段 | 主题 | 状态 |
 | --- | --- | --- |
-| Phase 0 | Local Data Foundation：项目骨架、MySQL OLTP 数据源与本地 Doris 基础环境 | **当前阶段** |
-| Phase 1 | Source & Ingestion：事件生成与 NiFi 采集 | 未开始 |
+| Phase 0 | Local Data Foundation：项目骨架、MySQL OLTP 数据源与本地 Doris 基础环境 | **Completed** |
+| Phase 1 | Traditional Data Warehouse Modeling | **下一阶段，未开始** |
 | Phase 2 | Event Streaming：Kafka 事件管道 | 未开始 |
 | Phase 3 | Stream Processing：Flink CDC 与流处理 | 未开始 |
 | Phase 4 | Real-time Warehouse：Apache Doris 与分层数据模型 | 未开始 |
@@ -88,9 +88,9 @@ Evaluation / Governance
 - LLM 与 Embedding 能力后续使用云 API，不在本地运行大模型。
 - 密码、Token、API Key 等敏感信息只通过本地环境变量或密钥机制管理，严禁提交到仓库。
 
-## 当前进度
+## Phase 0 完成状态
 
-Phase 0 已建立项目骨架与可独立运行的本地数据基础：
+Phase 0 已完成项目骨架与可独立运行的本地数据基础：
 
 - 规范化 OLTP 模型：用户、分类、SPU、SKU、订单、订单明细、支付和退款。
 - 可配置随机种子和日期范围、带生成前业务校验的 synthetic SQL 数据生成器。
@@ -98,7 +98,7 @@ Phase 0 已建立项目骨架与可独立运行的本地数据基础：
 - Apple Silicon 原生单节点 Doris All-In-One Compose，包含健康检查、幂等数据库初始化和持久化卷。
 - MySQL 与 Doris 各自独立的启停、状态、日志和数据库终端命令。
 
-源模型设计见 [`docs/data-model/source-model.md`](docs/data-model/source-model.md)。Doris 当前只提供本地运行基础设施和空的 `commerce_ai` 数据库；ODS、DIM、DWD、DWS、ADS 等数仓模型均未创建。Phase 1-9 的数据采集、消息、计算、数仓建模、语义层和 AI 能力仍未实现。
+源模型设计见 [`docs/data-model/source-model.md`](docs/data-model/source-model.md)。Doris 当前只提供本地运行基础设施和 `commerce_ai` 数据库；ODS、DIM、DWD、DWS、ADS 等正式数仓模型均未创建。下一阶段是 **Phase 1｜Traditional Data Warehouse Modeling**，目前尚未开始。其他数据采集、消息、计算、语义层和 AI 能力也仍未实现。
 
 ## Synthetic Data Generator
 
@@ -275,6 +275,48 @@ FE metadata 和 BE storage 分别保存在命名卷 `commerce_ai_doris_fe_meta` 
 docker compose --env-file .env -f infra/compose/compose.doris.yml down -v
 make doris-up
 ```
+
+## Phase 0 Final Verification
+
+`infra/scripts/verify-phase0.sh` 用于重复执行 Phase 0 最终环境验证。运行前需要 MySQL、Doris 和生成 SQL 均已准备好：
+
+```bash
+make mysql-up
+make doris-up
+infra/scripts/verify-phase0.sh
+```
+
+脚本执行以下安全检查：
+
+- 创建独立 MySQL 数据库 `commerce_verify`；如果数据库为空，则应用 `source/mysql/schema.sql` 并真实导入 `source/data-generator/output/generated-data.sql`。
+- 如果 `commerce_verify` 已有完整验证数据，则跳过重复导入并重新执行数量和业务一致性检查。
+- 如果验证库处于未知或不完整的 schema 状态，则返回非零并停止，不会清表或覆盖数据。
+- 在 Doris `commerce_ai` 中创建 `_dev_connection_test`，写入并读回 3 行后，只删除本次由脚本创建的临时表。
+- 不修改 `commerce`，不删除任何数据库或 Docker volume。
+
+当前 `small` 数据集已在 MySQL 8.4.11 中完成真实导入，结果如下：
+
+| 表 | 行数 |
+| --- | ---: |
+| `user_info` | 1,000 |
+| `sku_info` | 400 |
+| `order_info` | 10,000 |
+| `order_detail` | 25,955 |
+| `payment_info` | 13,939 |
+| `refund_info` | 724 |
+
+订单金额、成功支付、单订单成功支付数量、退款关联、退款支付状态和退款预占上限六项一致性检查的违规数均为 0。Doris 临时表写入、查询和清理也已通过。
+
+`commerce_verify` 默认保留，便于后续复验。只有确认验证数据不再需要时才手工删除：
+
+> **Warning：以下命令会永久删除 `commerce_verify` 及其中的验证数据。它不会删除 `commerce`，但执行前仍需确认数据库名。**
+
+```bash
+docker compose --env-file .env -f infra/compose/compose.mysql.yml exec -T mysql \
+  sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --user=root --execute="DROP DATABASE commerce_verify;"'
+```
+
+Phase 0 至此完成。下一阶段为 **Phase 1｜Traditional Data Warehouse Modeling**；本阶段未提前创建任何正式 ODS、DIM、DWD、DWS 或 ADS 表。
 
 ## 项目目录
 
